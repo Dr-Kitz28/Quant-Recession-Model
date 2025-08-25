@@ -4,7 +4,7 @@ We propose a **recession-warning system** that learns from how bond yield spread
 
 ---
 
-## 🔎 Overview
+## Overview
 - Starting with `n` distinct maturities (T-Bills and G-Secs), we compute all `nC2` spreads.  
 - For each day, we form a **symmetric correlation matrix** summarizing their comovement.  
 - Stacking these matrices over 20–25 years yields a **time-ordered tensor** — effectively a *“movie”* of the curve’s internal dynamics.  
@@ -12,7 +12,7 @@ We propose a **recession-warning system** that learns from how bond yield spread
 
 ---
 
-## ⚙️ Methodology
+## Methodology Used
 1. **Yield Curve Modeling**  
    - Use an Arbitrage-Free Nelson–Siegel (AFNS) term-structure model.  
    - AFNS factors (level, slope, curvature) evolve via a small VAR/VARX that incorporates Indian macro-financial drivers:  
@@ -33,11 +33,11 @@ We propose a **recession-warning system** that learns from how bond yield spread
 
 ---
 
-## 📊 Benchmarking & Evaluation
+## Benchmarking & Evaluation
 - Compare against **canonical term-spread models**.  
 - Evaluate on **lead time, stability, and calibration**.  
 
 ---
 
-## 🎯 Contribution
+## Contribution
 This project aims to provide an **earlier and more robust recession signal for India** by exploiting **higher-order comovement** across the yield curve, not just traditional level/slope metrics.
