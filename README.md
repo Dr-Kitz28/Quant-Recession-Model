@@ -1,11 +1,11 @@
-# Recession Warning System for India
+# Recession Warning System
 
-We propose a **recession-warning system** that learns from how bond yield spreads move together across the Indian sovereign curve.
+We propose a **recession-warning system** that learns from how bond yield spreads move together.
 
 ---
 
 ## Overview
-- Starting with `n` distinct maturities (T-Bills and G-Secs), we compute all `nC2` spreads.  
+- Starting with `n` distinct maturities, we compute all `nC2` spreads.  
 - For each day, we form a **symmetric correlation matrix** summarizing their comovement.  
 - Stacking these matrices over 20–25 years yields a **time-ordered tensor** — effectively a *"movie"* of the curve's internal dynamics.  
 - Hypothesis: **pattern shifts in this movie** (changes in network structure & correlation intensity) precede downturns in India's real economy.  
