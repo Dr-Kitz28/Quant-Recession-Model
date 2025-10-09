@@ -1,0 +1,6 @@
+outputs/*.npz
+outputs/*.html
+outputs/*.png
+__pycache__/
+*.pyc
+.venv/

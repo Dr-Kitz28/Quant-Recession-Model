@@ -1,0 +1,63 @@
+BOND DATA LOGGER - UBUNTU TRANSFER LIST
+==========================================
+
+ESSENTIAL FILES TO COPY (6 files only):
+---------------------------------------
+
+✅ CORE SYSTEM:
+1. bond_data_logger.py    - Main webscraping framework (559 lines)
+2. run_logger.py          - Command-line runner (109 lines)  
+3. config.py              - Your FRED API key configuration (34 lines)
+
+✅ SETUP & DOCS:
+4. README.md              - Clean documentation
+5. ubuntu_setup.sh        - Ubuntu installation script
+6. run_ubuntu.sh          - Ubuntu runner script
+
+TOTAL SIZE: ~50KB (lightweight system)
+
+❌ UNNECESSARY FILES TO DELETE/IGNORE:
+-------------------------------------
+- AuctionDaily.csv
+- build_daily_features.py
+- ccil_collector.py
+- cleanup_samples.bat
+- COLLECTION_SUMMARY.md
+- collect_data.bat
+- DailyCurveFeatures.csv
+- demo_pipeline.py
+- EXECUTION_SOLUTION.md
+- fbil_collector.py
+- india_data_sources.py
+- master_collector.py
+- NEXT_STEPS.md
+- OutstandingBySecurityMonthly.csv
+- OutstandingDaily.csv
+- OutstandingDaily_sample.csv
+- PYTHON_EXECUTION_FIX.md
+- rbi_collector.py
+- run_pipeline.bat
+- SecondaryTrade.csv
+- SecondaryVolumeDaily.csv
+- SecondaryVolumeDaily_sample.csv
+- SecurityMaster.csv
+- START_HERE.bat
+- TenorBucketDef.csv
+- test_logger.py
+- test_setup.py
+- utils_bucket_mapper.py
+- YieldDaily.csv
+- YieldDaily_sample.csv
+- .venv/ (virtual environment - recreate in Ubuntu)
+
+UBUNTU SETUP COMMANDS:
+---------------------
+mkdir ~/bond_logger && cd ~/bond_logger
+# Copy the 6 essential files here
+chmod +x ubuntu_setup.sh run_ubuntu.sh
+./ubuntu_setup.sh
+
+RUN DATA COLLECTION:
+-------------------
+./run_ubuntu.sh                      # Last 7 days
+./run_ubuntu.sh 2024-01-01 2024-08-30  # Custom range
