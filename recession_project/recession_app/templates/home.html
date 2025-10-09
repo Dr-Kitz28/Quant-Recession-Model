@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recession Project</title>
+</head>
+<body>
+    <h1>Recession Project</h1>
+
+    <h2>Bond Market Data</h2>
+    {{ bond_market_data|safe }}
+
+    <h2>Spreads USA</h2>
+    {{ spreads_usa|safe }}
+
+    <h2>Correlation Heatmaps</h2>
+    <img src="/static/images/correlation_heatmap.png" alt="Correlation Heatmap">
+</body>
+</html>

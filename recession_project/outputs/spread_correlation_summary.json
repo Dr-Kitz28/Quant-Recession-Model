@@ -1,7 +1,7 @@
 {
   "USA": {
     "spread_csv": "outputs\\spreads_usa.csv",
-    "correlation_npz": "outputs\\correlations_usa.npz",
+    "correlation_npz": "outputs\\correlation_tensor_usa.npz",
     "n_spreads": 55,
     "n_dates": 10192,
     "window": 60,

@@ -159,7 +159,7 @@ def prepare_spreads(
             "min_periods": min_periods,
         }
 
-        corr_path = output_dir / f"correlations_{country.lower()}.npz"
+        corr_path = output_dir / f"correlation_tensor_{country.lower()}.npz"
         np.savez_compressed(
             corr_path,
             dates=np.array(meta["dates"], dtype=object),
@@ -167,6 +167,7 @@ def prepare_spreads(
             corr=corr_cube,
             corr_scaled=corr_scaled,
         )
+        print(f"[info] Wrote correlation tensor to {corr_path}")
 
         outputs[country] = {
             "spread_csv": str(spread_csv),
