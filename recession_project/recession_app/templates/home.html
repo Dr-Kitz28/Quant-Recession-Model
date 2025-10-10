@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,13 +9,14 @@
 <body>
     <h1>Recession Project</h1>
 
-    <h2>Bond Market Data</h2>
-    {{ bond_market_data|safe }}
-
-    <h2>Spreads USA</h2>
-    {{ spreads_usa|safe }}
-
     <h2>Correlation Heatmaps</h2>
-    <img src="/static/images/correlation_heatmap.png" alt="Correlation Heatmap">
+    <p>
+        This heatmap is generated from your analysis scripts. 
+        To regenerate it with the latest data, go to the 
+        <a href="{% url 'update_heatmap' %}">update page</a>.
+    </p>
+
+    <img src="{% static heatmap_image_path %}" alt="Correlation Heatmap" style="max-width: 100%; height: auto;">
+
 </body>
 </html>
