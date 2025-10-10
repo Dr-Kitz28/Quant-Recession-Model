@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import json
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Render an interactive 2D correlation heatmap with a time slider using Plotly.")
@@ -47,21 +48,45 @@ def main():
             )
         )
 
-    # Create the slider steps
-    steps = []
+    # Create frames for animation instead of multiple traces
+    frames = []
     for i, date in enumerate(dates):
+        frame = go.Frame(
+            data=[go.Heatmap(
+                z=corr_scaled[i],
+                x=spreads,
+                y=spreads,
+                colorscale=[[0, 'red'], [1, 'blue']],
+                zmin=0,
+                zmax=1,
+                colorbar=dict(title='Correlation')
+            )],
+            name=date.strftime('%Y-%m-%d')
+        )
+        frames.append(frame)
+    
+    # Initialize with the last frame's data
+    fig = go.Figure(data=frames[-1].data)
+    fig.frames = frames
+
+    # Create slider steps that work with animation
+    slider_steps = []
+    for date in dates:
         step = dict(
-            method="update",
-            args=[{"visible": [d == date for d in dates]}],
+            method='animate',
+            args=[[date.strftime('%Y-%m-%d')],
+                  {'frame': {'duration': 100, 'redraw': True},
+                   'mode': 'immediate',
+                   'transition': {'duration': 50}}],
             label=date.strftime('%Y-%m-%d')
         )
-        steps.append(step)
+        slider_steps.append(step)
 
     sliders = [dict(
         active=len(dates) - 1,
         currentvalue={"prefix": "Date: "},
         pad={"t": 50},
-        steps=steps
+        steps=slider_steps
     )]
 
     # Configure the layout
@@ -73,14 +98,123 @@ def main():
         paper_bgcolor="#121212",
         plot_bgcolor="#121212",
         font_color="#e0e0e0",
-        xaxis=dict(showgrid=False),
-        yaxis=dict(showgrid=False, autorange='reversed'), # Show origin at top-left
+        xaxis=dict(showgrid=False, tickangle=-45),
+        yaxis=dict(showgrid=False, autorange='reversed'),
     )
 
-    # Save the figure to an HTML file
+    # Create the custom HTML and JavaScript with proper slider control
+    date_labels = [d.strftime('%Y-%m-%d') for d in dates]
+    
+    controls_html = """
+    <div id="custom-controls" style="padding: 10px 20px; text-align: center; background-color: #121212;">
+        <label for="date-search" style="margin-right: 10px; font-family: 'Roboto Mono', monospace; color: #e0e0e0;">
+            Jump to Date:
+        </label>
+        <input type="date" id="date-search" style="background-color: #333; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 5px;">
+        <button id="jump-to-date-btn" style="background-color: #03dac6; color: #121212; border: none; border-radius: 4px; padding: 6px 12px; margin-left: 5px; cursor: pointer; font-weight: bold;">
+            Go
+        </button>
+    </div>
+    """
+
+    js_code = f"""
+    <script id="date-data" type="application/json">{json.dumps(date_labels)}</script>
+    <script>
+        const plotlyDiv = document.querySelector('.plotly-graph-div');
+        
+        function initControls() {{
+            const gd = plotlyDiv;
+            const dates = JSON.parse(document.getElementById('date-data').textContent);
+            
+            function jumpToDate(index) {{
+                if (index >= 0 && index < dates.length) {{
+                    // First update the frame
+                    const frame = dates[index];
+                    Plotly.animate(gd, [frame], {{
+                        frame: {{ duration: 100, redraw: true }},
+                        mode: 'immediate',
+                        transition: {{ duration: 50 }}
+                    }}).then(() => {{
+                        // Then force update the slider and data
+                        return Plotly.update(gd, 
+                            // Update the data to match the frame
+                            {{'z': [gd._transitionData._frames.find(f => f.name === frame).data[0].z]}},
+                            // Update the slider position
+                            {{'sliders[0].active': index}}
+                        );
+                    }});
+                }}
+            }}
+
+            document.getElementById('jump-to-date-btn').addEventListener('click', () => {{
+                const input = document.getElementById('date-search').value;
+                if (!input) return;
+                
+                const targetDate = input.split('T')[0];
+                const dateIndex = dates.findIndex(d => d === targetDate);
+                
+                if (dateIndex !== -1) {{
+                    jumpToDate(dateIndex);
+                }} else {{
+                    const target = new Date(targetDate);
+                    const closest = dates.reduce((prev, curr, idx) => {{
+                        const prevDiff = Math.abs(new Date(dates[prev]) - target);
+                        const currDiff = Math.abs(new Date(curr) - target);
+                        return currDiff < prevDiff ? idx : prev;
+                    }}, 0);
+                    jumpToDate(closest);
+                }}
+            }});
+
+            window.addEventListener('keydown', (e) => {{
+                if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+                e.preventDefault();
+                
+                const curr = gd.layout.sliders[0].active;
+                const next = e.key === 'ArrowLeft' ? 
+                    Math.max(0, curr - 1) : 
+                    Math.min(dates.length - 1, curr + 1);
+                
+                if (next !== curr) {{
+                    jumpToDate(next);
+                }}
+            }});
+
+            // Set up initial date input
+            const dateInput = document.getElementById('date-search');
+            dateInput.value = dates[dates.length - 1];
+            dateInput.min = dates[0];
+            dateInput.max = dates[dates.length - 1];
+
+            // Also handle slider moves directly
+            gd.on('slider', function(e) {{
+                if (e && typeof e.step !== 'undefined') {{
+                    jumpToDate(e.step);
+                }}
+            }});
+        }}
+
+        if (plotlyDiv) {{
+            const observer = new MutationObserver((mutations, obs) => {{
+                if (document.querySelector('.main-svg')) {{
+                    initControls();
+                    obs.disconnect();
+                }}
+            }});
+            observer.observe(plotlyDiv, {{ childList: true, subtree: true }});
+        }}
+    </script>
+    """
+
+    # Write the complete HTML file
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    fig.write_html(args.output, full_html=False, include_plotlyjs='cdn')
-    print(f"[info] Interactive heatmap figure written to {args.output}")
+    
+    with open(args.output, "w", encoding="utf-8") as f:
+        f.write(controls_html)
+        fig.write_html(f, full_html=False, include_plotlyjs='cdn')
+        f.write(js_code)
+
+    print(f"[info] Interactive heatmap saved to {args.output}")
 
 if __name__ == "__main__":
     main()
