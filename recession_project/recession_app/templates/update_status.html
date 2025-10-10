@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="py-5 animated-section">
+    <div class="container text-center">
+        {% if success %}
+            <h1 class="section-title">Update Successful</h1>
+            <p class="lead" style="color: var(--primary-text);">The analysis scripts completed and the heatmap has been regenerated.</p>
+            <a href="{% url 'home' %}" class="btn btn-outline-light mt-3">Return to Homepage</a>
+        {% else %}
+            <h1 class="section-title" style="color: #f44336;">Update Failed</h1>
+            <p class="lead" style="color: var(--primary-text);">An error occurred while running the analysis scripts.</p>
+            
+            <div class="card text-start mt-4" style="background-color: #2a2a2a;">
+                <div class="card-header" style="border-color: #f44336;">Error Details</div>
+                <div class="card-body">
+                    <p><strong>Command:</strong></p>
+                    <pre style="white-space: pre-wrap; word-wrap: break-word; color: #ccc;"><code>{{ error.cmd | join:" " }}</code></pre>
+                    <p><strong>Return Code:</strong> {{ error.returncode }}</p>
+                    <p><strong>Error Output (stderr):</strong></p>
+                    <pre style="white-space: pre-wrap; word-wrap: break-word; color: #ccc;"><code>{{ error.stderr }}</code></pre>
+                </div>
+            </div>
+            <a href="{% url 'home' %}" class="btn btn-outline-light mt-4">Return to Homepage</a>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

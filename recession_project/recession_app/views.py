@@ -37,25 +37,36 @@ def update_heatmap(request):
     os.makedirs(static_images_dir, exist_ok=True)
 
     try:
-        # Run the analysis scripts to generate the data and heatmap image
-        # Using check=True will raise an exception if the scripts fail
-        subprocess.run(
+        # Run the analysis scripts and capture their output
+        print("--- Running generate_spreads_and_correlations.py ---")
+        result1 = subprocess.run(
             ['python', generate_script_path, '--output-dir', output_dir],
             check=True, capture_output=True, text=True
         )
-        subprocess.run(
+        print(result1.stdout)
+        if result1.stderr:
+            print("Errors:\n", result1.stderr)
+
+        print("\n--- Running visualize_correlation_matplotlib.py ---")
+        result2 = subprocess.run(
             ['python', visualize_script_path, '--npz', npz_path, '--output', heatmap_path],
             check=True, capture_output=True, text=True
         )
-        return HttpResponse("<h1>Success!</h1><p>The correlation heatmap has been updated.</p><a href='/'>Go back home</a>")
+        print(result2.stdout)
+        if result2.stderr:
+            print("Errors:\n", result2.stderr)
+
+        context = {'success': True}
+        return render(request, 'update_status.html', context)
     except subprocess.CalledProcessError as e:
-        # If a script fails, return an error message to the browser
-        error_message = f"""
-        <h1>Error updating heatmap</h1>
-        <p>A script failed to execute.</p>
-        <pre><strong>Command:</strong> {' '.join(e.cmd)}</pre>
-        <pre><strong>Return Code:</strong> {e.returncode}</pre>
-        <pre><strong>Output:</strong>\n{e.stdout}</pre>
-        <pre><strong>Error Output:</strong>\n{e.stderr}</pre>
-        """
-        return HttpResponse(error_message, status=500)
+        # If a script fails, render the status page with error details
+        context = {
+            'success': False,
+            'error': {
+                'cmd': e.cmd,
+                'returncode': e.returncode,
+                'stdout': e.stdout,
+                'stderr': e.stderr,
+            }
+        }
+        return render(request, 'update_status.html', context, status=500)

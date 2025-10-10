@@ -1,6 +1,7 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
-{% load static %}  <head>
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quant Recession Model</title>
@@ -154,78 +155,13 @@
 
     <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
         <div class="container">
-            <a class="navbar-brand" href="#">// Quant Recession Model</a>
+            <a class="navbar-brand" href="{% url 'home' %}">// Quant Recession Model</a>
         </div>
     </nav>
 
-    {% block content %}
-    <header class="hero animated-section">
-        <div class="container">
-            <h1>Predicting Economic Recessions</h1>
-            <p class="lead" style="color: var(--secondary-text);">Using yield curve inversion as a predictive indicator.</p>
-        </div>
-    </header>
-
-    <section id="overview" class="py-5 animated-section" style="animation-delay: 0.2s;">
-        <h2 class="section-title">Project Overview</h2>
-        <div class="row">
-            <div class="col-md-8 mx-auto text-center">
-                <p class="lead" style="color: var(--primary-text);">This project analyzes the powerful relationship between the **yield curve spread** and economic recessions.</p>
-                <p style="color: var(--secondary-text);">Historically, an inverted yield curve—where short-term bond yields exceed long-term yields—has consistently preceded economic downturns. This model processes historical bond data to identify and visualize the specific spreads with the highest predictive correlation.</p>
-            </div>
-        </div>
-    </section>
-
-    <hr>
-
-    <section id="findings" class="py-5 animated-section" style="animation-delay: 0.4s;">
-        <h2 class="section-title">Key Findings</h2>
-        {% if summary_data %}
-        <div class="row justify-content-center">
-            <div class="col-md-5 mb-4">
-                <div class="card text-center h-100">
-                    <div class="card-header">Highest Correlation Spread</div>
-                    <div class="card-body">
-                        <h5 class="card-title mt-3">{{ summary_data.highest_correlation_spread.spread }}</h5>
-                        <p class="card-text" style="color: var(--secondary-text);">The most reliable predictive indicator found in the data.</p>
-                        <h3 class="display-4" style="color: var(--accent-color);">{{ summary_data.highest_correlation_spread.correlation|floatformat:4 }}</h3>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-5 mb-4">
-                <div class="card text-center h-100">
-                    <div class="card-header">Lowest Correlation Spread</div>
-                    <div class="card-body">
-                        <h5 class="card-title mt-3">{{ summary_data.lowest_correlation_spread.spread }}</h5>
-                        <p class="card-text" style="color: var(--secondary-text);">The least effective indicator.</p>
-                         <h3 class="display-4" style="color: var(--primary-text);">{{ summary_data.lowest_correlation_spread.correlation|floatformat:4 }}</h3>
-                    </div>
-                </div>
-            </div>
-        </div>
-        {% else %}
-        <p class="text-center">Summary data is not available.</p>
-        {% endif %}
-    </section>
-
-    <hr>
-
-    <section id="analysis" class="py-5 animated-section" style="animation-delay: 0.6s;">
-        <h2 class="section-title">Correlation Heatmap</h2>
-        <p class="text-center mb-4 mx-auto" style="max-width: 600px; color: var(--secondary-text);">The heatmap visualizes the correlation between various bond yield spreads and the NBER recession indicator. Brighter cells represent a stronger predictive relationship.</p>
-        {% if heatmap_image_path %}
-            <div class="text-center">
-                <img src="{% static heatmap_image_path %}" alt="Correlation Heatmap" class="img-fluid rounded">
-            </div>
-        {% else %}
-            <p class="text-center">Correlation heatmap image not found.</p>
-        {% endif %}
-        <div class="text-center mt-4">
-            <a href="{% url 'update_heatmap' %}" class="btn btn-outline-light">Update Heatmap Data</a>
-            <p class="text-muted small mt-2">(This may take a few moments to run)</p>
-        </div>
-    </section>
-    {% endblock %}
+    <main class="container my-5">
+        {% block content %}{% endblock %}
+    </main>
 
     <footer class="footer">
         <div class="container">
