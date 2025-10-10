@@ -56,16 +56,37 @@ def main():
                 z=corr_scaled[i],
                 x=spreads,
                 y=spreads,
-                colorscale=[[0, 'red'], [1, 'blue']],
+                colorscale=[
+                    [0, 'rgb(165,0,38)'],    # Dark red for low values
+                    [0.25, 'rgb(215,48,39)'], # Light red
+                    [0.5, 'rgb(244,109,67)'], # Orange
+                    [0.75, 'rgb(69,117,180)'],# Light blue
+                    [1, 'rgb(49,54,149)']     # Dark blue for high values
+                ],
                 zmin=0,
                 zmax=1,
-                colorbar=dict(title='Correlation')
+                colorbar=dict(
+                    title=dict(
+                        text='Correlation',
+                        side='right',
+                        font=dict(size=14)
+                    ),
+                    thickness=20,
+                    thicknessmode='pixels',
+                    len=0.75,
+                    tickformat='.2f',
+                    x=1.02
+                ),
+                xgap=1,  # Add gap between cells
+                ygap=1,  # Add gap between cells
+                hoverongaps=False,
+                hovertemplate='Spread Y: %{y}<br>Spread X: %{x}<br>Correlation: %{z:.3f}<extra></extra>'
             )],
             name=date.strftime('%Y-%m-%d')
         )
         frames.append(frame)
     
-    # Initialize with the last frame's data
+    # Initialize with the last frame's data for the initial view
     fig = go.Figure(data=frames[-1].data)
     fig.frames = frames
 
@@ -91,15 +112,40 @@ def main():
 
     # Configure the layout
     fig.update_layout(
-        title='Interactive Correlation Heatmap',
-        xaxis_title="Spread (i)",
-        yaxis_title="Spread (j)",
+        title={
+            'text': 'Interactive Correlation Heatmap',
+            'y': 0.95,
+            'x': 0.5,
+            'xanchor': 'center',
+            'yanchor': 'top',
+            'font': dict(size=24)
+        },
+        xaxis_title={
+            'text': "Spread (i)",
+            'font': dict(size=16)
+        },
+        yaxis_title={
+            'text': "Spread (j)",
+            'font': dict(size=16)
+        },
         sliders=sliders,
         paper_bgcolor="#121212",
         plot_bgcolor="#121212",
         font_color="#e0e0e0",
-        xaxis=dict(showgrid=False, tickangle=-45),
-        yaxis=dict(showgrid=False, autorange='reversed'),
+        xaxis=dict(
+            showgrid=False,
+            tickangle=-45,
+            tickfont=dict(size=12),
+            side='bottom'
+        ),
+        yaxis=dict(
+            showgrid=False,
+            autorange='reversed',
+            tickfont=dict(size=12),
+            side='left'
+        ),
+        margin=dict(t=100, l=100, r=100, b=100),
+        height=800  # Increase height for better visibility
     )
 
     # Create the custom HTML and JavaScript with proper slider control
