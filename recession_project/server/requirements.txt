@@ -1,0 +1,3 @@
+fastapi>=0.118
+uvicorn[standard]>=0.37
+numpy>=1.24

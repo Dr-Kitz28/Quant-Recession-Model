@@ -1,0 +1,122 @@
+﻿.app-shell {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.app-content {
+  width: min(1200px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.app-header h2 {
+  margin-bottom: 0.5rem;
+}
+
+.app-header p {
+  margin: 0;
+  color: var(--secondary-text, #b0b0b0);
+}
+
+.app-loader {
+  padding: 2rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.app-alert {
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.app-alert--error {
+  border-color: rgba(244, 67, 54, 0.4);
+  background: rgba(244, 67, 54, 0.15);
+  color: #ffbdb7;
+}
+
+.frame-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+}
+
+.frame-controls__row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.frame-controls__button {
+  background: var(--accent-color, #03dac6);
+  color: #081316;
+  border: none;
+  border-radius: 9999px;
+  padding: 0.5rem 1.25rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.frame-controls__button:hover {
+  transform: translateY(-1px);
+}
+
+.frame-controls__status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 180px;
+}
+
+.frame-controls__frame {
+  font-weight: 600;
+}
+
+.frame-controls__date {
+  font-size: 0.9rem;
+  color: var(--secondary-text, #b0b0b0);
+}
+
+.frame-controls__speed {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.frame-controls__speed select {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+  color: inherit;
+  padding: 0.35rem 0.75rem;
+}
+
+.frame-controls__slider {
+  width: 100%;
+  accent-color: var(--accent-color, #03dac6);
+}
+
+.plot-wrapper {
+  height: clamp(420px, 65vh, 720px);
+  background: white;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+  padding: 0.5rem;
+}
+
+#heatmap-root {
+  width: 100%;
+}
+

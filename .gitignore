@@ -4,3 +4,11 @@ outputs/*.png
 __pycache__/
 *.pyc
 .venv/
+.venv_wsl/
+.wsl_venv/
+node_modules/
+backups/
+*.log
+*.pid
+package-lock.json
+recession_project/outputs/*.npz
