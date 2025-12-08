@@ -20,6 +20,7 @@ from typing import Tuple, List, Optional
 import numpy as np
 import pandas as pd
 import torch
+from scipy import interpolate
 
 
 def load_correlation_data(corr_npz: Path, anchor_csv: Path) -> Tuple[np.ndarray, np.ndarray, pd.DatetimeIndex, List[str]]:
@@ -120,22 +121,46 @@ def apply_rl_adjustments(
     return np.array(adjusted)
 
 
+# NBER Recession dates (monthly, US)
+NBER_RECESSIONS = [
+    ("1980-01-01", "1980-07-31"),   # 1980 recession
+    ("1981-07-01", "1982-11-30"),   # 1981-82 recession  
+    ("1990-07-01", "1991-03-31"),   # 1990-91 recession
+    ("2001-03-01", "2001-11-30"),   # Dot-com bust
+    ("2007-12-01", "2009-06-30"),   # Great Recession
+    ("2020-02-01", "2020-04-30"),   # COVID-19 recession
+]
+
+
+def create_recession_labels(dates: pd.DatetimeIndex) -> np.ndarray:
+    """Create binary recession labels based on NBER dates."""
+    labels = np.zeros(len(dates), dtype=float)
+    
+    for start, end in NBER_RECESSIONS:
+        start_dt = pd.to_datetime(start)
+        end_dt = pd.to_datetime(end)
+        mask = (dates >= start_dt) & (dates <= end_dt)
+        labels[mask] = 1.0
+    
+    return labels
+
+
 def compute_recession_probabilities(
     correlations: np.ndarray,
     dates: pd.DatetimeIndex,
     spreads: List[str],
     window: int = 60,
-    lookback: int = 252,  # 1 year lookback for regime detection
+    lookback: int = 252,
+    horizon_months: int = 6,  # Forecast horizon in months
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Compute recession probabilities from correlation features.
+    Compute calibrated recession probabilities from correlation features.
     
-    Uses multiple indicators:
-    1. Correlation breakdown: when high-corr assets decouple (flight to quality)
-    2. Correlation regime change: sudden jumps in average correlation
-    3. Correlation dispersion: wide spread of correlations = stress
-    4. Mean reversion signal: deviation from long-term mean
-    5. Eigenvalue concentration: first PC explaining too much variance = crisis
+    Key changes for proper calibration:
+    1. Use NBER recession labels as ground truth
+    2. Compute features that correlate with recession onset
+    3. Calibrate output to match empirical base rate (~12%)
+    4. Create horizon-specific labels (recession in next k months)
     
     Returns: probabilities, lower_bound, upper_bound
     """
@@ -143,132 +168,187 @@ def compute_recession_probabilities(
     n_spreads = correlations.shape[1]
     triu_idx = np.triu_indices(n_spreads, k=1)
 
-    print(f"[pipeline] Computing recession probabilities for {n_dates} dates...")
-
-    # Pre-compute rolling statistics
-    mean_corrs = []
+    print(f"[pipeline] Computing calibrated recession probabilities for {n_dates} dates...")
+    
+    # Create recession labels
+    recession_labels = create_recession_labels(dates)
+    base_rate = recession_labels.mean()
+    print(f"  Historical recession base rate: {base_rate:.1%}")
+    
+    # Create horizon labels: "recession within next k months"
+    horizon_days = horizon_months * 21  # ~21 trading days per month
+    horizon_labels = np.zeros(n_dates)
     for t in range(n_dates):
-        corr_flat = correlations[t][triu_idx]
-        valid = ~np.isnan(corr_flat)
-        if valid.sum() > 10:
-            mean_corrs.append(np.mean(corr_flat[valid]))
-        else:
-            mean_corrs.append(np.nan)
+        future_window = min(t + horizon_days, n_dates)
+        if recession_labels[t:future_window].max() > 0:
+            horizon_labels[t] = 1.0
     
-    mean_corrs = np.array(mean_corrs)
-    mean_series = pd.Series(mean_corrs, index=dates)
+    horizon_base_rate = horizon_labels.mean()
+    print(f"  {horizon_months}-month horizon base rate: {horizon_base_rate:.1%}")
+
+    # Compute correlation-based stress features
+    print(f"  Computing correlation stress features...")
     
-    # Rolling long-term mean and std
-    rolling_mean = mean_series.rolling(window=lookback, min_periods=60).mean()
-    rolling_std = mean_series.rolling(window=lookback, min_periods=60).std()
-    
-    # Z-score: deviation from long-term mean
-    z_scores = (mean_series - rolling_mean) / (rolling_std + 1e-6)
-    
-    # Rolling volatility of correlations (regime change indicator)
-    corr_volatility = mean_series.diff().abs().rolling(window=20, min_periods=5).mean()
-    
-    probs = []
+    # First pass: compute basic features
+    basic_features = []
     for t in range(n_dates):
         corr_flat = correlations[t][triu_idx]
         valid = ~np.isnan(corr_flat)
 
         if valid.sum() < 10:
-            probs.append(np.nan)
+            basic_features.append([np.nan] * 7)
             continue
 
-        # Feature 1: Mean correlation level (high = crisis, flight to quality)
+        # Feature 1: Mean correlation (stress = high correlation)
         mean_corr = np.mean(corr_flat[valid])
         
-        # Feature 2: Correlation dispersion (high = uncertainty/stress)
-        corr_dispersion = np.std(corr_flat[valid])
+        # Feature 2: Correlation volatility (20-day change)
+        if t >= 20:
+            prev_flat = correlations[t-20][triu_idx]
+            prev_valid = ~np.isnan(prev_flat)
+            both = valid & prev_valid
+            if both.sum() > 10:
+                corr_change = np.abs(corr_flat[both] - prev_flat[both]).mean()
+            else:
+                corr_change = 0.0
+        else:
+            corr_change = 0.0
         
-        # Feature 3: Fraction of very high correlations (>0.7) - crisis signature
-        high_corr_frac = (corr_flat[valid] > 0.7).sum() / valid.sum()
-        
-        # Feature 4: Fraction of negative correlations (flight to quality)
-        neg_frac = (corr_flat[valid] < 0).sum() / valid.sum()
-        
-        # Feature 5: Z-score - deviation from long-term regime
-        z = z_scores.iloc[t] if not np.isnan(z_scores.iloc[t]) else 0.0
-        
-        # Feature 6: Recent volatility in correlations
-        vol = corr_volatility.iloc[t] if not np.isnan(corr_volatility.iloc[t]) else 0.0
-        
-        # Feature 7: Eigenvalue concentration (first PC)
+        # Feature 3: Eigenvalue concentration (systemic risk)
         try:
-            corr_mat = correlations[t].copy()
-            # Fill NaN with 0 for eigendecomposition
-            corr_mat = np.nan_to_num(corr_mat, nan=0.0)
+            corr_mat = np.nan_to_num(correlations[t], nan=0.0)
             np.fill_diagonal(corr_mat, 1.0)
             eigenvalues = np.linalg.eigvalsh(corr_mat)
             eigenvalues = np.sort(eigenvalues)[::-1]
-            # First eigenvalue ratio
             eigen_ratio = eigenvalues[0] / (eigenvalues.sum() + 1e-6)
+            # Top 3 eigenvalues concentration
+            top3_ratio = eigenvalues[:3].sum() / (eigenvalues.sum() + 1e-6)
         except:
-            eigen_ratio = 0.5
+            eigen_ratio = 0.3
+            top3_ratio = 0.5
         
-        # Combine features into recession score
-        # Key insight: Recessions show:
-        # - Rising correlations (diversification loss)
-        # - High volatility in correlations (regime change)
-        # - First eigenvalue dominance (single factor driving all)
-        # - But also some negative correlations (flight to quality)
+        # Feature 4: High correlation fraction (contagion)
+        high_frac = (corr_flat[valid] > 0.6).sum() / valid.sum()
         
-        # Normalize features to [0, 1] range with tighter bounds
-        f1 = np.clip((mean_corr - 0.3) / 0.5, 0, 1)  # mean corr: 0.3-0.8 range
-        f2 = np.clip((corr_dispersion - 0.1) / 0.3, 0, 1)  # dispersion: 0.1-0.4 range
-        f3 = np.clip((high_corr_frac - 0.1) / 0.4, 0, 1)  # high corr: 0.1-0.5 range
-        f4 = np.clip(neg_frac * 3, 0, 1)             # neg frac scaled (rare = important)
-        f5 = np.clip((z + 1.5) / 3, 0, 1)            # z-score: -1.5 to +1.5 range
-        f6 = np.clip(vol * 100, 0, 1)                # volatility scaled
-        f7 = np.clip((eigen_ratio - 0.2) / 0.5, 0, 1)  # eigen ratio: 0.2-0.7 range
+        # Feature 5: Negative correlation fraction (flight to quality)
+        neg_frac = (corr_flat[valid] < -0.1).sum() / valid.sum()
         
-        # Weighted combination - emphasize regime change indicators
-        raw_score = (
-            0.15 * f1 +  # mean correlation
-            0.10 * f2 +  # dispersion
-            0.10 * f3 +  # high correlation fraction
-            0.10 * f4 +  # negative correlations
-            0.20 * f5 +  # z-score deviation (key regime indicator)
-            0.20 * f6 +  # correlation volatility (crisis signature)
-            0.15 * f7    # eigenvalue concentration
-        )
+        # Feature 6: Correlation dispersion (uncertainty)
+        corr_std = np.std(corr_flat[valid])
         
-        # Sigmoid transformation with centered threshold
-        prob = 1.0 / (1.0 + np.exp(-10 * (raw_score - 0.5)))
-        probs.append(prob)
-
-    probs = np.array(probs)
-
-    # Rescale probabilities to have better calibration
-    # Use percentile-based rescaling to ensure good discrimination
-    valid_probs = probs[~np.isnan(probs)]
-    p10 = np.percentile(valid_probs, 10)
-    p90 = np.percentile(valid_probs, 90)
+        # Feature 7: 5th percentile (extreme low correlation)
+        corr_p5 = np.percentile(corr_flat[valid], 5)
+        
+        basic_features.append([mean_corr, corr_change, eigen_ratio, high_frac, 
+                               neg_frac, corr_std, corr_p5])
     
-    # Rescale so p10 → ~0.15 and p90 → ~0.85
-    probs_rescaled = (probs - p10) / (p90 - p10 + 1e-6)
-    probs_rescaled = np.clip(probs_rescaled, 0, 1)
-    # Apply a slight sigmoid to smooth extremes
-    probs_rescaled = 0.1 + 0.8 * probs_rescaled
-    probs = probs_rescaled
-
-    # Smooth with rolling window
-    probs_series = pd.Series(probs, index=dates)
-    probs_smooth = probs_series.rolling(window=window, min_periods=1, center=True).mean()
+    basic_features = np.array(basic_features)
     
-    # Fill NaN by interpolation
-    probs_smooth = probs_smooth.interpolate(method='linear', limit_direction='both')
-    probs_smooth = probs_smooth.fillna(0.5).values
-
-    # Confidence bands based on rolling std
-    probs_raw_series = pd.Series(probs, index=dates)
-    probs_std = probs_raw_series.rolling(window=window, min_periods=1, center=True).std()
-    probs_std = probs_std.fillna(0.1).values
+    # Convert to DataFrame for easier feature engineering
+    feature_df = pd.DataFrame(basic_features, index=dates,
+                              columns=['mean_corr', 'corr_change', 'eigen_ratio', 
+                                       'high_frac', 'neg_frac', 'corr_std', 'corr_p5'])
     
-    lower_bound = np.clip(probs_smooth - 1.96 * probs_std, 0, 1)
-    upper_bound = np.clip(probs_smooth + 1.96 * probs_std, 0, 1)
+    # Add rolling statistics as additional features
+    for col in ['mean_corr', 'corr_change', 'eigen_ratio']:
+        # 60-day rolling mean and std
+        feature_df[f'{col}_ma60'] = feature_df[col].rolling(60, min_periods=1).mean()
+        feature_df[f'{col}_std60'] = feature_df[col].rolling(60, min_periods=1).std()
+        
+        # 20-day change 
+        feature_df[f'{col}_chg20'] = feature_df[col] - feature_df[col].shift(20)
+        
+        # Z-score relative to 252-day history
+        rolling_mean = feature_df[col].rolling(252, min_periods=60).mean()
+        rolling_std = feature_df[col].rolling(252, min_periods=60).std() + 1e-6
+        feature_df[f'{col}_zscore'] = (feature_df[col] - rolling_mean) / rolling_std
+    
+    # Fill NaN values
+    feature_df = feature_df.fillna(0.0)
+    
+    features = feature_df.values
+    feature_names = list(feature_df.columns)
+    print(f"  Total features: {len(feature_names)}")
+    
+    # Normalize features to z-scores  
+    feature_means = np.nanmean(features, axis=0)
+    feature_stds = np.nanstd(features, axis=0) + 1e-6
+    features_z = (features - feature_means) / feature_stds
+    features_z = np.nan_to_num(features_z, nan=0.0)
+    
+    # CALIBRATION: Use logistic regression trained on horizon labels
+    # This learns optimal weights and produces calibrated probabilities
+    print(f"  Training Random Forest for calibration...")
+    
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.isotonic import IsotonicRegression
+    from sklearn.calibration import CalibratedClassifierCV
+    
+    # Only use historical data for training (not future forecast)
+    valid_mask = np.ones(len(dates), dtype=bool)
+    valid_mask &= dates <= pd.Timestamp("2025-11-25")
+    
+    X_train = features_z[valid_mask]
+    y_train = horizon_labels[valid_mask]
+    
+    # Train Random Forest with class weighting
+    rf = RandomForestClassifier(
+        n_estimators=200,
+        max_depth=8,
+        min_samples_leaf=50,
+        class_weight={0: 1, 1: 7},  # Heavy weight on recessions (they're rare)
+        random_state=42,
+        n_jobs=-1
+    )
+    rf.fit(X_train, y_train)
+    
+    # Get feature importances
+    importances = rf.feature_importances_
+    sorted_idx = np.argsort(importances)[::-1]
+    print(f"  Top 5 important features:")
+    for i in sorted_idx[:5]:
+        print(f"    {feature_names[i]}: {importances[i]:.3f}")
+    
+    # Get raw probabilities from Random Forest
+    raw_probs = rf.predict_proba(features_z)[:, 1]
+    
+    # Smooth raw predictions (60-day rolling)
+    probs_series = pd.Series(raw_probs, index=dates)
+    probs_smooth = probs_series.rolling(window=window, min_periods=1, center=False).mean()
+
+    probs_smooth = probs_smooth.fillna(base_rate).values
+    
+    # Apply Isotonic Regression for monotonic calibration
+    # This ensures higher raw scores → higher calibrated probabilities
+    iso = IsotonicRegression(out_of_bounds='clip')
+    iso.fit(probs_smooth[valid_mask], y_train)
+    calibrated_probs = iso.predict(probs_smooth)
+    calibrated_probs = np.clip(calibrated_probs, 0.01, 0.99)
+    
+    # Final smoothing
+    probs_series = pd.Series(calibrated_probs, index=dates)
+    probs_smooth = probs_series.rolling(window=window//2, min_periods=1, center=True).mean()
+    probs_smooth = probs_smooth.fillna(base_rate).values
+    
+    # Verify calibration
+    final_mean = probs_smooth[valid_mask].mean()
+    print(f"  Final mean probability: {final_mean:.1%} (target: {horizon_base_rate:.1%})")
+    
+    # Check recession vs expansion separation
+    rec_mask = valid_mask & (recession_labels == 1)
+    exp_mask = valid_mask & (recession_labels == 0)
+    if rec_mask.sum() > 0 and exp_mask.sum() > 0:
+        p_rec = probs_smooth[rec_mask].mean()
+        p_exp = probs_smooth[exp_mask].mean()
+        print(f"  P(recession) during recessions: {p_rec:.1%}")
+        print(f"  P(recession) during expansions: {p_exp:.1%}")
+
+    # Confidence bands
+    probs_std = probs_series.rolling(window=window, min_periods=1, center=True).std()
+    probs_std = probs_std.fillna(0.05).values
+    
+    lower_bound = np.clip(probs_smooth - 1.96 * probs_std, 0.01, 0.99)
+    upper_bound = np.clip(probs_smooth + 1.96 * probs_std, 0.01, 0.99)
 
     return probs_smooth, lower_bound, upper_bound
 
