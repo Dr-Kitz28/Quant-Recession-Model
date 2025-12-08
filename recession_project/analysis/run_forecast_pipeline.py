@@ -125,14 +125,17 @@ def compute_recession_probabilities(
     dates: pd.DatetimeIndex,
     spreads: List[str],
     window: int = 60,
+    lookback: int = 252,  # 1 year lookback for regime detection
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Compute recession probabilities from correlation features.
     
-    Uses a simple heuristic based on correlation regime:
-    - High average correlation (>0.5) → higher recession probability
-    - Rapid changes in correlation structure → stress indicator
-    - Negative correlations → flight-to-quality signal
+    Uses multiple indicators:
+    1. Correlation breakdown: when high-corr assets decouple (flight to quality)
+    2. Correlation regime change: sudden jumps in average correlation
+    3. Correlation dispersion: wide spread of correlations = stress
+    4. Mean reversion signal: deviation from long-term mean
+    5. Eigenvalue concentration: first PC explaining too much variance = crisis
     
     Returns: probabilities, lower_bound, upper_bound
     """
@@ -142,6 +145,29 @@ def compute_recession_probabilities(
 
     print(f"[pipeline] Computing recession probabilities for {n_dates} dates...")
 
+    # Pre-compute rolling statistics
+    mean_corrs = []
+    for t in range(n_dates):
+        corr_flat = correlations[t][triu_idx]
+        valid = ~np.isnan(corr_flat)
+        if valid.sum() > 10:
+            mean_corrs.append(np.mean(corr_flat[valid]))
+        else:
+            mean_corrs.append(np.nan)
+    
+    mean_corrs = np.array(mean_corrs)
+    mean_series = pd.Series(mean_corrs, index=dates)
+    
+    # Rolling long-term mean and std
+    rolling_mean = mean_series.rolling(window=lookback, min_periods=60).mean()
+    rolling_std = mean_series.rolling(window=lookback, min_periods=60).std()
+    
+    # Z-score: deviation from long-term mean
+    z_scores = (mean_series - rolling_mean) / (rolling_std + 1e-6)
+    
+    # Rolling volatility of correlations (regime change indicator)
+    corr_volatility = mean_series.diff().abs().rolling(window=20, min_periods=5).mean()
+    
     probs = []
     for t in range(n_dates):
         corr_flat = correlations[t][triu_idx]
@@ -151,50 +177,98 @@ def compute_recession_probabilities(
             probs.append(np.nan)
             continue
 
-        # feature 1: mean absolute correlation
-        mean_abs_corr = np.abs(corr_flat[valid]).mean()
-
-        # feature 2: fraction of negative correlations
+        # Feature 1: Mean correlation level (high = crisis, flight to quality)
+        mean_corr = np.mean(corr_flat[valid])
+        
+        # Feature 2: Correlation dispersion (high = uncertainty/stress)
+        corr_dispersion = np.std(corr_flat[valid])
+        
+        # Feature 3: Fraction of very high correlations (>0.7) - crisis signature
+        high_corr_frac = (corr_flat[valid] > 0.7).sum() / valid.sum()
+        
+        # Feature 4: Fraction of negative correlations (flight to quality)
         neg_frac = (corr_flat[valid] < 0).sum() / valid.sum()
-
-        # feature 3: correlation dispersion (std)
-        corr_std = corr_flat[valid].std()
-
-        # feature 4: change from previous day
-        if t > 0:
-            prev_flat = correlations[t - 1][triu_idx]
-            prev_valid = ~np.isnan(prev_flat)
-            both_valid = valid & prev_valid
-            if both_valid.sum() > 10:
-                change = np.abs(corr_flat[both_valid] - prev_flat[both_valid]).mean()
-            else:
-                change = 0.0
-        else:
-            change = 0.0
-
-        # combine into probability using logistic-like transformation
-        # higher correlation + higher dispersion + higher change → more stress
+        
+        # Feature 5: Z-score - deviation from long-term regime
+        z = z_scores.iloc[t] if not np.isnan(z_scores.iloc[t]) else 0.0
+        
+        # Feature 6: Recent volatility in correlations
+        vol = corr_volatility.iloc[t] if not np.isnan(corr_volatility.iloc[t]) else 0.0
+        
+        # Feature 7: Eigenvalue concentration (first PC)
+        try:
+            corr_mat = correlations[t].copy()
+            # Fill NaN with 0 for eigendecomposition
+            corr_mat = np.nan_to_num(corr_mat, nan=0.0)
+            np.fill_diagonal(corr_mat, 1.0)
+            eigenvalues = np.linalg.eigvalsh(corr_mat)
+            eigenvalues = np.sort(eigenvalues)[::-1]
+            # First eigenvalue ratio
+            eigen_ratio = eigenvalues[0] / (eigenvalues.sum() + 1e-6)
+        except:
+            eigen_ratio = 0.5
+        
+        # Combine features into recession score
+        # Key insight: Recessions show:
+        # - Rising correlations (diversification loss)
+        # - High volatility in correlations (regime change)
+        # - First eigenvalue dominance (single factor driving all)
+        # - But also some negative correlations (flight to quality)
+        
+        # Normalize features to [0, 1] range with tighter bounds
+        f1 = np.clip((mean_corr - 0.3) / 0.5, 0, 1)  # mean corr: 0.3-0.8 range
+        f2 = np.clip((corr_dispersion - 0.1) / 0.3, 0, 1)  # dispersion: 0.1-0.4 range
+        f3 = np.clip((high_corr_frac - 0.1) / 0.4, 0, 1)  # high corr: 0.1-0.5 range
+        f4 = np.clip(neg_frac * 3, 0, 1)             # neg frac scaled (rare = important)
+        f5 = np.clip((z + 1.5) / 3, 0, 1)            # z-score: -1.5 to +1.5 range
+        f6 = np.clip(vol * 100, 0, 1)                # volatility scaled
+        f7 = np.clip((eigen_ratio - 0.2) / 0.5, 0, 1)  # eigen ratio: 0.2-0.7 range
+        
+        # Weighted combination - emphasize regime change indicators
         raw_score = (
-            0.3 * mean_abs_corr +
-            0.2 * neg_frac +
-            0.2 * corr_std +
-            0.3 * min(change * 10, 1.0)  # scale change
+            0.15 * f1 +  # mean correlation
+            0.10 * f2 +  # dispersion
+            0.10 * f3 +  # high correlation fraction
+            0.10 * f4 +  # negative correlations
+            0.20 * f5 +  # z-score deviation (key regime indicator)
+            0.20 * f6 +  # correlation volatility (crisis signature)
+            0.15 * f7    # eigenvalue concentration
         )
-
-        # sigmoid transformation
-        prob = 1.0 / (1.0 + np.exp(-5 * (raw_score - 0.4)))
+        
+        # Sigmoid transformation with centered threshold
+        prob = 1.0 / (1.0 + np.exp(-10 * (raw_score - 0.5)))
         probs.append(prob)
 
     probs = np.array(probs)
 
-    # smooth with rolling window
-    probs_series = pd.Series(probs, index=dates)
-    probs_smooth = probs_series.rolling(window=window, min_periods=1, center=True).mean().values
+    # Rescale probabilities to have better calibration
+    # Use percentile-based rescaling to ensure good discrimination
+    valid_probs = probs[~np.isnan(probs)]
+    p10 = np.percentile(valid_probs, 10)
+    p90 = np.percentile(valid_probs, 90)
+    
+    # Rescale so p10 → ~0.15 and p90 → ~0.85
+    probs_rescaled = (probs - p10) / (p90 - p10 + 1e-6)
+    probs_rescaled = np.clip(probs_rescaled, 0, 1)
+    # Apply a slight sigmoid to smooth extremes
+    probs_rescaled = 0.1 + 0.8 * probs_rescaled
+    probs = probs_rescaled
 
-    # confidence bands (simple approximation)
-    probs_std = probs_series.rolling(window=window, min_periods=1, center=True).std().fillna(0.05).values
-    lower_bound = np.clip(probs_smooth - 2 * probs_std, 0, 1)
-    upper_bound = np.clip(probs_smooth + 2 * probs_std, 0, 1)
+    # Smooth with rolling window
+    probs_series = pd.Series(probs, index=dates)
+    probs_smooth = probs_series.rolling(window=window, min_periods=1, center=True).mean()
+    
+    # Fill NaN by interpolation
+    probs_smooth = probs_smooth.interpolate(method='linear', limit_direction='both')
+    probs_smooth = probs_smooth.fillna(0.5).values
+
+    # Confidence bands based on rolling std
+    probs_raw_series = pd.Series(probs, index=dates)
+    probs_std = probs_raw_series.rolling(window=window, min_periods=1, center=True).std()
+    probs_std = probs_std.fillna(0.1).values
+    
+    lower_bound = np.clip(probs_smooth - 1.96 * probs_std, 0, 1)
+    upper_bound = np.clip(probs_smooth + 1.96 * probs_std, 0, 1)
 
     return probs_smooth, lower_bound, upper_bound
 
@@ -363,9 +437,12 @@ def main():
     print(f"  Saved adjusted correlations to {args.output_dir / 'adjusted_correlations.npz'}")
 
     # 4. Compute recession probabilities
-    print("\n[4/5] Computing recession probabilities...")
+    # NOTE: Use RAW correlations for probability calculation
+    # The NN/RL adjustments are experimental and may produce degenerate outputs
+    # The raw correlations contain the actual market signal
+    print("\n[4/5] Computing recession probabilities from raw correlations...")
     probabilities, lower_bound, upper_bound = compute_recession_probabilities(
-        adjusted_correlations, dates, spreads, window=args.window
+        correlations, dates, spreads, window=args.window  # Use raw correlations
     )
 
     # Save predictions
