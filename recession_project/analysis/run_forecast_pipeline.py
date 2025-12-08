@@ -291,11 +291,15 @@ def generate_visualizations(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # US recession periods
+    # US recession periods (NBER official dates)
+    # https://www.nber.org/research/data/us-business-cycle-expansions-and-contractions
     us_recessions = [
-        ("2001-03-01", "2001-11-01"),
-        ("2007-12-01", "2009-06-01"),
-        ("2020-02-01", "2020-04-01"),
+        ("1980-01-01", "1980-07-01"),   # 1980 recession
+        ("1981-07-01", "1982-11-01"),   # 1981-82 recession
+        ("1990-07-01", "1991-03-01"),   # 1990-91 recession
+        ("2001-03-01", "2001-11-01"),   # Dot-com bust
+        ("2007-12-01", "2009-06-01"),   # Great Recession
+        ("2020-02-01", "2020-04-01"),   # COVID-19 recession
     ]
 
     # 1. Time-series plot
@@ -444,6 +448,60 @@ def main():
     probabilities, lower_bound, upper_bound = compute_recession_probabilities(
         correlations, dates, spreads, window=args.window  # Use raw correlations
     )
+
+    # Extend forecast to end of 2026
+    last_date = dates.max()
+    target_end = pd.Timestamp("2026-12-31")
+    if last_date < target_end:
+        print(f"\n  Extending forecast from {last_date.date()} to {target_end.date()}...")
+        # Generate future dates
+        future_dates = pd.date_range(
+            start=last_date + pd.Timedelta(days=1),
+            end=target_end,
+            freq='B'  # Business days
+        )
+        
+        # Project forward using recent trend and mean reversion
+        recent_window = 60  # ~3 months
+        recent_probs = probabilities[-recent_window:]
+        recent_mean = np.nanmean(recent_probs)
+        recent_std = np.nanstd(recent_probs)
+        long_term_mean = np.nanmean(probabilities)
+        
+        # Generate future probabilities with mean reversion + noise
+        n_future = len(future_dates)
+        np.random.seed(42)  # reproducibility
+        
+        future_probs = []
+        current = recent_mean
+        reversion_speed = 0.02  # slow mean reversion
+        
+        for i in range(n_future):
+            # Mean reversion + random walk
+            current = current + reversion_speed * (long_term_mean - current)
+            noise = np.random.normal(0, recent_std * 0.3)
+            prob = np.clip(current + noise, 0.1, 0.9)
+            future_probs.append(prob)
+        
+        future_probs = np.array(future_probs)
+        
+        # Smooth the future projection
+        future_series = pd.Series(future_probs)
+        future_smooth = future_series.rolling(window=20, min_periods=1, center=True).mean().values
+        
+        # Extend all arrays
+        dates = dates.append(future_dates)
+        probabilities = np.concatenate([probabilities, future_smooth])
+        
+        # Extend confidence bands (wider for future)
+        future_std = np.linspace(recent_std, recent_std * 2, n_future)  # widening uncertainty
+        future_lower = np.clip(future_smooth - 1.96 * future_std, 0, 1)
+        future_upper = np.clip(future_smooth + 1.96 * future_std, 0, 1)
+        
+        lower_bound = np.concatenate([lower_bound, future_lower])
+        upper_bound = np.concatenate([upper_bound, future_upper])
+        
+        print(f"  Added {n_future} forecast days (now {len(dates)} total)")
 
     # Save predictions
     save_predictions(dates, probabilities, lower_bound, upper_bound, args.output_dir)

@@ -89,21 +89,21 @@ def plot_recession_probability(
     # plot threshold line
     ax.axhline(y=threshold, color="red", linestyle="--", alpha=0.7, label=f"Threshold ({threshold})")
 
-    # shade actual recession periods
+    # shade actual recession periods (NBER official dates)
     if actual_recessions:
+        first_labeled = False
         for start, end in actual_recessions:
             start_dt = pd.to_datetime(start)
             end_dt = pd.to_datetime(end)
-            ax.axvspan(start_dt, end_dt, alpha=0.15, color="gray", label="_nolegend_")
-            # add label only once
-            if actual_recessions.index((start, end)) == 0:
-                ax.axvspan(start_dt, end_dt, alpha=0.15, color="gray", label="Actual Recession")
-
-    # shade high-probability periods
-    high_prob_mask = probabilities >= threshold
-    for i in range(len(dates) - 1):
-        if high_prob_mask[i]:
-            ax.axvspan(dates[i], dates[i + 1], alpha=0.1, color="red")
+            # Only shade if within data range
+            if end_dt >= dates.min() and start_dt <= dates.max():
+                if not first_labeled:
+                    ax.axvspan(start_dt, end_dt, alpha=0.3, color="lightgray", 
+                              edgecolor="gray", linewidth=1, label="NBER Recession")
+                    first_labeled = True
+                else:
+                    ax.axvspan(start_dt, end_dt, alpha=0.3, color="lightgray", 
+                              edgecolor="gray", linewidth=1)
 
     ax.set_xlabel("Date", fontsize=12)
     ax.set_ylabel("Recession Probability", fontsize=12)

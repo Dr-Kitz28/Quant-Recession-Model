@@ -1,13 +1,13 @@
 {
-  "date_range": "1985-01-02 to 2025-11-25",
-  "total_days": 10229,
-  "mean_probability": 0.5731276063661722,
-  "std_probability": 0.24445858589446165,
-  "median_probability": 0.6193268715498212,
+  "date_range": "1985-01-02 to 2026-12-31",
+  "total_days": 10516,
+  "mean_probability": 0.5712658410421612,
+  "std_probability": 0.24185384586774505,
+  "median_probability": 0.6083137102998423,
   "min_probability": 0.1,
   "max_probability": 0.9,
-  "high_probability_days": 6551,
-  "high_probability_pct": 64.04340600254179,
+  "high_probability_days": 6753,
+  "high_probability_pct": 64.2164321034614,
   "threshold": 0.5,
   "high_probability_periods": [
     {
@@ -229,6 +229,10 @@
     {
       "start": "2024-09-24",
       "end": "2025-04-08"
+    },
+    {
+      "start": "2026-03-25",
+      "end": "2026-12-31"
     }
   ]
 }
