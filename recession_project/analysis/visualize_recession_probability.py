@@ -136,6 +136,8 @@ def plot_probability_heatmap(
     title: str = "Recession Probability by Forecast Horizon",
     output_path: Optional[Path] = None,
     figsize: Tuple[int, int] = (16, 6),
+    forecast_start: Optional[pd.Timestamp] = None,
+    forecast_peak: Optional[pd.Timestamp] = None,
 ) -> plt.Figure:
     """
     Create heatmap of recession probabilities across different horizons.
@@ -147,6 +149,8 @@ def plot_probability_heatmap(
         title: Plot title
         output_path: Optional path to save figure
         figsize: Figure size
+        forecast_start: Date where forecast begins (for visual marker)
+        forecast_peak: Date of forecast peak (for annotation)
 
     Returns:
         matplotlib Figure object
@@ -174,6 +178,28 @@ def plot_probability_heatmap(
     ax.set_xlabel("Date", fontsize=12)
 
     ax.set_title(title, fontsize=14, fontweight="bold")
+    
+    # Add forecast zone marker
+    if forecast_start is not None:
+        try:
+            # Find index of forecast start
+            forecast_idx = dates.get_indexer([forecast_start], method='nearest')[0]
+            ax.axvline(x=forecast_idx, color="white", linestyle="--", linewidth=2, alpha=0.8)
+            ax.text(forecast_idx + 5, len(horizons) - 0.5, "← Forecast", color="white", 
+                   fontsize=10, fontweight="bold", verticalalignment="center")
+        except:
+            pass
+    
+    # Add forecast peak marker
+    if forecast_peak is not None:
+        try:
+            peak_idx = dates.get_indexer([forecast_peak], method='nearest')[0]
+            ax.axvline(x=peak_idx, color="white", linestyle=":", linewidth=2, alpha=0.9)
+            ax.scatter([peak_idx], [0], color="white", s=100, marker="v", zorder=5)
+            ax.text(peak_idx, -0.7, f"Peak\n{forecast_peak.strftime('%Y-%m')}", 
+                   color="darkred", fontsize=9, fontweight="bold", ha="center")
+        except:
+            pass
 
     # colorbar
     cbar = plt.colorbar(im, ax=ax, shrink=0.8)

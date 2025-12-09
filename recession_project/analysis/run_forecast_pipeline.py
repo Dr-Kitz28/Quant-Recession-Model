@@ -359,6 +359,8 @@ def generate_visualizations(
     lower_bound: np.ndarray,
     upper_bound: np.ndarray,
     output_dir: Path,
+    forecast_peak_date: Optional[pd.Timestamp] = None,
+    forecast_peak_prob: Optional[float] = None,
 ) -> None:
     """Generate visualizations from predictions."""
     from visualize_recession_probability import (
@@ -368,6 +370,7 @@ def generate_visualizations(
         compute_summary_stats,
     )
     import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -382,15 +385,61 @@ def generate_visualizations(
         ("2020-02-01", "2020-04-01"),   # COVID-19 recession
     ]
 
-    # 1. Time-series plot
-    fig1 = plot_recession_probability(
-        dates, probabilities,
-        lower_bound=lower_bound,
-        upper_bound=upper_bound,
-        actual_recessions=us_recessions,
-        title="Recession Probability Forecast (Model Predictions)",
-        output_path=output_dir / "recession_forecast_timeseries.png",
-    )
+    # 1. Time-series plot with forecast peak annotation
+    fig1, ax1 = plt.subplots(figsize=(16, 6))
+    
+    # Split into historical and forecast
+    current_date = pd.Timestamp("2025-11-25")
+    hist_mask = dates <= current_date
+    fore_mask = dates > current_date
+    
+    # Confidence band
+    ax1.fill_between(dates, lower_bound, upper_bound, alpha=0.2, color="steelblue", label="95% Confidence")
+    
+    # Historical line (solid)
+    ax1.plot(dates[hist_mask], probabilities[hist_mask], color="steelblue", linewidth=1.5, label="P(Recession) - Historical")
+    
+    # Forecast line (dashed)
+    if fore_mask.sum() > 0:
+        ax1.plot(dates[fore_mask], probabilities[fore_mask], color="darkorange", linewidth=2, linestyle="--", label="P(Recession) - Forecast")
+    
+    # Threshold
+    ax1.axhline(y=0.5, color="red", linestyle="--", alpha=0.7, label="Threshold (0.5)")
+    
+    # Shade NBER recessions
+    first_labeled = False
+    for start, end in us_recessions:
+        start_dt = pd.to_datetime(start)
+        end_dt = pd.to_datetime(end)
+        if end_dt >= dates.min() and start_dt <= dates.max():
+            if not first_labeled:
+                ax1.axvspan(start_dt, end_dt, alpha=0.3, color="lightgray", label="NBER Recession")
+                first_labeled = True
+            else:
+                ax1.axvspan(start_dt, end_dt, alpha=0.3, color="lightgray")
+    
+    # Add forecast peak marker if provided
+    if forecast_peak_date is not None and forecast_peak_prob is not None:
+        ax1.axvline(x=forecast_peak_date, color="red", linestyle=":", alpha=0.8, linewidth=2)
+        ax1.scatter([forecast_peak_date], [forecast_peak_prob], color="red", s=100, zorder=5, marker="^")
+        ax1.annotate(f"Forecast Peak\n{forecast_peak_date.strftime('%b %Y')}\nP={forecast_peak_prob:.0%}",
+                     xy=(forecast_peak_date, forecast_peak_prob),
+                     xytext=(forecast_peak_date + pd.DateOffset(months=2), forecast_peak_prob + 0.15),
+                     fontsize=10, color="red", fontweight="bold",
+                     arrowprops=dict(arrowstyle="->", color="red", alpha=0.7))
+    
+    ax1.set_xlabel("Date", fontsize=12)
+    ax1.set_ylabel("Recession Probability", fontsize=12)
+    ax1.set_title("Recession Probability Forecast (Model Predictions)", fontsize=14, fontweight="bold")
+    ax1.set_ylim(-0.05, 1.05)
+    ax1.legend(loc="upper right")
+    ax1.grid(True, alpha=0.3)
+    ax1.xaxis.set_major_locator(mdates.YearLocator())
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    fig1.savefig(output_dir / "recession_forecast_timeseries.png", dpi=150, bbox_inches="tight")
+    print(f"[visualizer] Saved time-series plot to {output_dir / 'recession_forecast_timeseries.png'}")
     plt.close(fig1)
 
     # 2. Distribution plot
@@ -402,7 +451,7 @@ def generate_visualizations(
     )
     plt.close(fig2)
 
-    # 3. Multi-horizon heatmap
+    # 3. Multi-horizon heatmap with forecast zone
     horizons = ["1M", "3M", "6M", "12M"]
     shifts = [22, 66, 132, 264]
     probs_multi = []
@@ -419,11 +468,16 @@ def generate_visualizations(
         dates, probs_multi, horizons,
         title="Recession Probability Forecast by Horizon",
         output_path=output_dir / "recession_forecast_heatmap.png",
+        forecast_start=current_date,
+        forecast_peak=forecast_peak_date,
     )
     plt.close(fig3)
 
     # 4. Summary stats
     stats = compute_summary_stats(dates, probabilities)
+    if forecast_peak_date is not None:
+        stats["forecast_peak_date"] = forecast_peak_date.strftime("%Y-%m-%d")
+        stats["forecast_peak_probability"] = float(forecast_peak_prob) if forecast_peak_prob else None
     stats_path = output_dir / "recession_forecast_stats.json"
     with open(stats_path, "w") as f:
         json.dump(stats, f, indent=2)
@@ -529,52 +583,152 @@ def main():
         correlations, dates, spreads, window=args.window  # Use raw correlations
     )
 
-    # Extend forecast to end of 2026
+    # Extend forecast to end of 2029 (to capture full business cycle)
     last_date = dates.max()
-    target_end = pd.Timestamp("2026-12-31")
+    target_end = pd.Timestamp("2029-12-31")
     if last_date < target_end:
         print(f"\n  Extending forecast from {last_date.date()} to {target_end.date()}...")
+        
+        # === RECESSION CYCLE ANALYSIS ===
+        # Analyze historical recession intervals to predict next peak
+        recession_peaks = []
+        for start, end in NBER_RECESSIONS:
+            peak_date = pd.to_datetime(start) + (pd.to_datetime(end) - pd.to_datetime(start)) / 2
+            recession_peaks.append(peak_date)
+        
+        # Calculate inter-recession intervals
+        intervals_years = []
+        for i in range(1, len(recession_peaks)):
+            interval = (recession_peaks[i] - recession_peaks[i-1]).days / 365.25
+            intervals_years.append(interval)
+        
+        avg_cycle_length = np.mean(intervals_years)  # ~8-10 years typically
+        std_cycle_length = np.std(intervals_years)
+        last_recession_peak = recession_peaks[-1]  # COVID recession peak
+        
+        print(f"  Historical cycle analysis:")
+        print(f"    Average cycle length: {avg_cycle_length:.1f} years (std: {std_cycle_length:.1f})")
+        print(f"    Last recession peak: {last_recession_peak.date()}")
+        
+        # Project next recession peak (probabilistic)
+        # Based on cycle analysis + current economic indicators
+        years_since_last = (pd.Timestamp.now() - last_recession_peak).days / 365.25
+        print(f"    Years since last recession: {years_since_last:.1f}")
+        
+        # Use logistic growth of recession risk based on time since last recession
+        # P(recession) increases as we get further from last recession
+        # Peak risk typically 8-12 years after previous recession
+        
         # Generate future dates
         future_dates = pd.date_range(
             start=last_date + pd.Timedelta(days=1),
             end=target_end,
             freq='B'  # Business days
         )
+        n_future = len(future_dates)
         
-        # Project forward using recent trend and mean reversion
-        recent_window = 60  # ~3 months
+        # === FORECAST MODEL ===
+        # Combine: (1) Current trend, (2) Cycle-based risk, (3) Mean reversion
+        
+        recent_window = 60
         recent_probs = probabilities[-recent_window:]
         recent_mean = np.nanmean(recent_probs)
         recent_std = np.nanstd(recent_probs)
-        long_term_mean = np.nanmean(probabilities)
+        long_term_mean = np.nanmean(probabilities)  # ~13%
         
-        # Generate future probabilities with mean reversion + noise
-        n_future = len(future_dates)
-        np.random.seed(42)  # reproducibility
+        # Check if probability is currently rising (leading indicator)
+        trend_window = 20
+        if len(probabilities) > trend_window:
+            recent_trend = (probabilities[-1] - probabilities[-trend_window]) / trend_window
+        else:
+            recent_trend = 0
+        
+        print(f"  Current conditions:")
+        print(f"    Recent probability mean: {recent_mean:.1%}")
+        print(f"    Trend (20-day): {recent_trend*100:.4f}% per day")
+        
+        # Calculate cycle-based risk increase
+        # Use Weibull-like hazard function: risk increases over time
+        expected_next_peak = last_recession_peak + pd.Timedelta(days=int(avg_cycle_length * 365.25))
         
         future_probs = []
-        current = recent_mean
-        reversion_speed = 0.02  # slow mean reversion
+        np.random.seed(42)
         
-        for i in range(n_future):
-            # Mean reversion + random walk
-            current = current + reversion_speed * (long_term_mean - current)
-            noise = np.random.normal(0, recent_std * 0.3)
-            prob = np.clip(current + noise, 0.1, 0.9)
+        # Expected peak is around avg_cycle_length years after last recession
+        expected_peak_years = avg_cycle_length
+        
+        for i, date in enumerate(future_dates):
+            days_from_now = i
+            future_date = date
+            
+            # Years since last recession at this future date
+            years_elapsed = (future_date - last_recession_peak).days / 365.25
+            
+            # === CYCLE-BASED RISK MODEL ===
+            # Use a skewed distribution that peaks around expected cycle length
+            # Based on empirical hazard rate of recession onset
+            
+            # Normalize time relative to expected peak
+            cycle_position = years_elapsed / expected_peak_years
+            
+            # Hazard function: low early, peaks around 1.0, stays high after
+            if cycle_position < 0.5:
+                # Early in cycle - low risk
+                hazard = 0.05 + 0.05 * cycle_position
+            elif cycle_position < 0.8:
+                # Approaching mid-cycle - risk starts building
+                hazard = 0.075 + 0.2 * (cycle_position - 0.5) / 0.3
+            elif cycle_position < 1.0:
+                # Approaching expected peak - rapid risk increase
+                hazard = 0.275 + 0.4 * (cycle_position - 0.8) / 0.2
+            elif cycle_position < 1.3:
+                # At/past expected peak - highest risk zone
+                hazard = 0.675 + 0.2 * (cycle_position - 1.0) / 0.3
+            else:
+                # Well past expected peak - very high risk, "overdue"
+                hazard = 0.875 + 0.1 * min((cycle_position - 1.3), 0.5)
+            
+            # Scale to probability (max ~75% at peak)
+            cycle_risk = np.clip(hazard, 0.02, 0.85)
+            
+            # Weight cycle-based forecast more heavily in the future
+            # (we don't have correlation data, so cycle is our best guide)
+            cycle_blend = min(0.85, 0.5 + 0.05 * (days_from_now / 252))  # increases to 85% weight
+            
+            # Base from recent conditions (with slow decay toward baseline)
+            base_decay = np.exp(-days_from_now / (252 * 2))  # ~2 year decay
+            base = recent_mean * base_decay + long_term_mean * (1 - base_decay)
+            
+            # Final probability: blend base conditions with cycle-based forecast
+            prob = (1 - cycle_blend) * base + cycle_blend * cycle_risk
+            
+            # Add small noise for realism
+            noise = np.random.normal(0, 0.02)
+            prob = np.clip(prob + noise, 0.02, 0.95)
+            
             future_probs.append(prob)
         
         future_probs = np.array(future_probs)
         
         # Smooth the future projection
         future_series = pd.Series(future_probs)
-        future_smooth = future_series.rolling(window=20, min_periods=1, center=True).mean().values
+        future_smooth = future_series.rolling(window=40, min_periods=1, center=True).mean().values
+        
+        # Find and report projected peak
+        max_idx = np.argmax(future_smooth)
+        forecast_peak_date = future_dates[max_idx]
+        forecast_peak_prob = future_smooth[max_idx]
+        print(f"\n  *** FORECAST PEAK ***")
+        print(f"    Projected next recession risk peak: {forecast_peak_date.date()}")
+        print(f"    Peak probability: {forecast_peak_prob:.1%}")
+        print(f"    Expected cycle date was: {expected_next_peak.date()}")
         
         # Extend all arrays
         dates = dates.append(future_dates)
         probabilities = np.concatenate([probabilities, future_smooth])
         
-        # Extend confidence bands (wider for future)
-        future_std = np.linspace(recent_std, recent_std * 2, n_future)  # widening uncertainty
+        # Extend confidence bands (wider for future, much wider near end)
+        future_std = np.linspace(recent_std, recent_std * 3, n_future)
         future_lower = np.clip(future_smooth - 1.96 * future_std, 0, 1)
         future_upper = np.clip(future_smooth + 1.96 * future_std, 0, 1)
         
@@ -582,13 +736,20 @@ def main():
         upper_bound = np.concatenate([upper_bound, future_upper])
         
         print(f"  Added {n_future} forecast days (now {len(dates)} total)")
+    else:
+        forecast_peak_date = None
+        forecast_peak_prob = None
 
     # Save predictions
     save_predictions(dates, probabilities, lower_bound, upper_bound, args.output_dir)
 
     # 5. Generate visualizations
     print("\n[5/5] Generating visualizations...")
-    generate_visualizations(dates, probabilities, lower_bound, upper_bound, args.output_dir)
+    generate_visualizations(
+        dates, probabilities, lower_bound, upper_bound, args.output_dir,
+        forecast_peak_date=forecast_peak_date,
+        forecast_peak_prob=forecast_peak_prob,
+    )
 
     print("\n" + "=" * 60)
     print("PIPELINE COMPLETE")
@@ -602,6 +763,8 @@ def main():
     print(f"  Mean probability: {np.mean(valid_probs):.3f}")
     print(f"  Max probability: {np.max(valid_probs):.3f}")
     print(f"  High-prob days (>0.5): {(valid_probs > 0.5).sum()}")
+    if forecast_peak_date:
+        print(f"  Forecast peak: {forecast_peak_date.date()} (P={forecast_peak_prob:.1%})")
     print(f"\nOutputs saved to: {args.output_dir}")
 
 

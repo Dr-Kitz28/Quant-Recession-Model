@@ -1,13 +1,13 @@
 {
-  "date_range": "1985-01-02 to 2026-12-31",
-  "total_days": 10516,
-  "mean_probability": 0.13059980409829228,
-  "std_probability": 0.27822934209776323,
-  "median_probability": 0.018856207635937344,
+  "date_range": "1985-01-02 to 2029-12-31",
+  "total_days": 11298,
+  "mean_probability": 0.15478027959401877,
+  "std_probability": 0.28272697220990917,
+  "median_probability": 0.02113226438685727,
   "min_probability": 0.01,
   "max_probability": 0.99,
-  "high_probability_days": 1306,
-  "high_probability_pct": 12.419170787371623,
+  "high_probability_days": 1635,
+  "high_probability_pct": 14.47158789166224,
   "threshold": 0.5,
   "high_probability_periods": [
     {
@@ -29,6 +29,12 @@
     {
       "start": "2019-10-09",
       "end": "2020-07-14"
+    },
+    {
+      "start": "2028-09-27",
+      "end": "2029-12-31"
     }
-  ]
+  ],
+  "forecast_peak_date": "2029-12-18",
+  "forecast_peak_probability": 0.6176902992505969
 }
