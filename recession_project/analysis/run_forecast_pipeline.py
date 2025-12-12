@@ -929,6 +929,7 @@ def compute_recession_probabilities_gat(
     model_path: Path,
     device: str = "cpu",
     seq_len: int = 60,
+    historical_cutoff: Optional[pd.Timestamp] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Compute recession probabilities using trained GAT-Transformer model.
@@ -936,7 +937,7 @@ def compute_recession_probabilities_gat(
     This is the upgraded approach using Graph Attention Networks + Transformer.
     Falls back to RF-based method if model not found.
     """
-    from model.recession_gat_transformer import RecessionGATTransformer, create_graph_from_correlation
+    from model.recession_gat_transformer import RecessionGATTransformer
     
     print(f"[pipeline] Computing recession probabilities with GAT-Transformer...")
     
@@ -949,48 +950,38 @@ def compute_recession_probabilities_gat(
         print(f"  Falling back to Random Forest method")
         return compute_recession_probabilities(correlations, dates, spreads)
     
-    # Build node/edge features matching training
+    # Build node/edge features matching training using SpreadGraph (directed edges)
     print(f"  Building graph features for {n_dates} dates...")
-    node_features = []
-    edge_features = []
-    
-    for t in range(n_dates):
-        corr_mat = correlations[t]
-        
-        # Node features per spread
-        nf = []
-        for i, sp in enumerate(spreads):
-            parts = sp.split("-")
-            tenor_map = {"3M": 0.25, "6M": 0.5, "1Y": 1, "2Y": 2, "3Y": 3, "5Y": 5, 
-                        "7Y": 7, "10Y": 10, "20Y": 20, "30Y": 30}
-            if len(parts) == 2:
-                t1 = tenor_map.get(parts[0], 1.0)
-                t2 = tenor_map.get(parts[1], 1.0)
-            else:
-                t1, t2 = 1.0, 1.0
-            slope = (t1 - t2) / 30.0
-            mean_corr = np.nanmean(corr_mat[i, :]) if not np.all(np.isnan(corr_mat[i, :])) else 0.0
-            max_corr = np.nanmax(corr_mat[i, :]) if not np.all(np.isnan(corr_mat[i, :])) else 0.0
-            std_corr = np.nanstd(corr_mat[i, :]) if not np.all(np.isnan(corr_mat[i, :])) else 0.0
-            pos_frac = np.nanmean(corr_mat[i, :] > 0) if not np.all(np.isnan(corr_mat[i, :])) else 0.5
-            
-            nf.append([np.log(t1 + 1), np.log(t2 + 1), slope, mean_corr, 
-                       max_corr, std_corr, pos_frac])
-        node_features.append(np.nan_to_num(np.array(nf, dtype=np.float32)))
-        
-        # Edge features (simplified - just correlation values)
-        ef = []
-        triu_idx = np.triu_indices(n_spreads, k=1)
-        for i, j in zip(triu_idx[0], triu_idx[1]):
-            c = corr_mat[i, j]
-            if np.isnan(c):
-                c = 0.0
-            ef.append([c, abs(c), c**2, 1.0 if c > 0 else 0.0, 
-                       0.0, 0.0, 0.0, 0.0])  # 8 features
-        edge_features.append(np.array(ef, dtype=np.float32))
-    
-    node_features = np.array(node_features)
-    edge_features = np.array(edge_features)
+    try:
+        from model.gnn_correlation_learner import SpreadGraph
+        sg = SpreadGraph(spreads)
+        node_features = []
+        edge_features = []
+
+        for t in range(n_dates):
+            corr_mat = correlations[t]
+            prev_corr = correlations[t - 1] if t > 0 else corr_mat
+            nf = sg.get_node_features(corr_mat)
+            ef = sg.get_edge_features(corr_mat, prev_corr)
+            node_features.append(nf.cpu().numpy())
+            edge_features.append(ef.cpu().numpy())
+
+        node_features = np.array(node_features)
+        edge_features = np.array(edge_features)
+    except Exception as e:
+        # Fallback to simple features if SpreadGraph isn't available
+        print(f"  WARNING: SpreadGraph unavailable ({e}), falling back to simple features")
+        node_features = []
+        edge_features = []
+        for t in range(n_dates):
+            corr_mat = correlations[t]
+            nf = np.zeros((n_spreads, 7), dtype=np.float32)
+            ef = np.zeros((n_spreads * (n_spreads - 1), 8), dtype=np.float32)
+            node_features.append(nf)
+            edge_features.append(ef)
+        node_features = np.array(node_features)
+        edge_features = np.array(edge_features)
+
     macro_features = anchors
     
     # Load model
@@ -1015,13 +1006,121 @@ def compute_recession_probabilities_gat(
         print(f"  Falling back to Random Forest method")
         return compute_recession_probabilities(correlations, dates, spreads)
     
-    # For now, use RF as the GAT model needs complex graph input format
-    # The GAT model is more suitable for training-time evaluation
-    # rather than batch inference in the pipeline
-    print(f"  Note: GAT model trained. Using hybrid RF+GAT insights for calibration.")
-    
-    # Use RF-based method with enhanced features from GAT insights
-    return compute_recession_probabilities(correlations, dates, spreads)
+    # Run inference in sliding windows using the GAT-Transformer
+    n_dates = len(dates)
+    probabilities = np.full(n_dates, np.nan)
+
+    seq_stride = max(1, seq_len // 2)
+
+    # Build a SpreadGraph helper once
+    spread_graph = None
+    try:
+        from model.gnn_correlation_learner import SpreadGraph
+        spread_graph = SpreadGraph(spreads)
+    except Exception:
+        # Fall back to creating edge_index dynamically
+        spread_graph = None
+
+    with torch.no_grad():
+        for start in range(0, n_dates - seq_len + 1, seq_stride):
+            end = start + seq_len
+
+            # Build graph_sequences as list of dicts per timestep
+            graph_sequences = []
+            if spread_graph is None:
+                sg = None
+            else:
+                sg = spread_graph
+                edge_index = sg.edge_index.to(device)
+
+            for t in range(start, end):
+                nf = torch.tensor(node_features[t], dtype=torch.float32).to(device)
+                ef = torch.tensor(edge_features[t], dtype=torch.float32).to(device)
+
+                if sg is not None:
+                    ei = edge_index
+                else:
+                    # Construct full directed edge_index for n_spreads
+                    src = []
+                    dst = []
+                    for i in range(n_spreads):
+                        for j in range(n_spreads):
+                            if i != j:
+                                src.append(i)
+                                dst.append(j)
+                    ei = torch.tensor([src, dst], dtype=torch.long).to(device)
+
+                graph_sequences.append({
+                    'node_features': nf,
+                    'edge_index': ei,
+                    'edge_attr': ef,
+                })
+
+            # Macro features for the window
+            mf_seq = torch.tensor(macro_features[start:end], dtype=torch.float32).unsqueeze(0).to(device)
+
+            output = model(graph_sequences, mf_seq, return_interpretability=False)
+            # output['probs']: (batch=1, seq_len, n_horizons)
+            probs = output.get('probs')
+            if probs is None:
+                continue
+            probs_np = probs.squeeze(0).cpu().numpy()  # (seq_len, n_horizons)
+
+            # Use 6-month horizon (index 1) by convention
+            if probs_np.shape[1] < 2:
+                horizon_pred = probs_np[:, 0]
+            else:
+                horizon_pred = probs_np[:, 1]
+
+            for i, p in enumerate(horizon_pred):
+                idx = start + i
+                if np.isnan(probabilities[idx]):
+                    probabilities[idx] = p
+                else:
+                    probabilities[idx] = (probabilities[idx] + p) / 2.0
+
+    # Fill edges (start and tail) using nearest valid
+    valid_idx = ~np.isnan(probabilities)
+    if valid_idx.any():
+        first_valid = np.where(valid_idx)[0][0]
+        last_valid = np.where(valid_idx)[0][-1]
+        probabilities[:first_valid] = probabilities[first_valid]
+        probabilities[last_valid + 1:] = probabilities[last_valid]
+
+    # Calibration: train an isotonic regressor on historical portion only
+    try:
+        from sklearn.isotonic import IsotonicRegression
+
+        # Build horizon labels from NBER for calibration
+        full_labels = create_recession_labels(dates)
+        horizon_days = 6 * 21
+        horizon_labels = np.zeros(len(dates), dtype=float)
+        for t in range(len(dates)):
+            future_window = min(t + horizon_days, len(dates))
+            if full_labels[t:future_window].max() > 0:
+                horizon_labels[t] = 1.0
+
+        # Determine historical mask by anchors length (assumes anchors contains historical+projected)
+        historical_cutoff = dates[len(anchors) - 1] if len(anchors) < len(dates) else dates[-1]
+        hist_mask = dates <= historical_cutoff
+        if hist_mask.sum() > 30 and horizon_labels[hist_mask].sum() > 0:
+            iso = IsotonicRegression(out_of_bounds='clip')
+            try:
+                iso.fit(probabilities[hist_mask], horizon_labels[hist_mask])
+                probabilities_cal = iso.transform(probabilities)
+                probabilities = np.clip(probabilities_cal, 0.0, 1.0)
+                print("  Applied isotonic calibration to GAT probabilities using historical data.")
+            except Exception:
+                print("  Isotonic calibration failed; leaving raw GAT probabilities.")
+        else:
+            print("  Not enough historical positives for isotonic calibration; leaving raw GAT probabilities.")
+    except Exception:
+        print("  sklearn not available or calibration failed; returning raw GAT probabilities.")
+
+    lower_bound = np.clip(probabilities - 0.1, 0, 1)
+    upper_bound = np.clip(probabilities + 0.1, 0, 1)
+
+    return probabilities, lower_bound, upper_bound
 
 
 def main():
@@ -1127,8 +1226,8 @@ def main():
             all_anchors = np.vstack([all_anchors, pad])
         
         probabilities, lower_bound, upper_bound = compute_recession_probabilities_gat(
-            extended_correlations, all_anchors, extended_dates, spreads, 
-            args.gat_model, args.device
+            extended_correlations, all_anchors, extended_dates, spreads,
+            args.gat_model, args.device, seq_len=60, historical_cutoff=last_actual_date
         )
     else:
         probabilities, lower_bound, upper_bound = compute_recession_probabilities(
