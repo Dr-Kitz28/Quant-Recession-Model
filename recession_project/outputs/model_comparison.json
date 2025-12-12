@@ -1,0 +1,18 @@
+{
+  "mlp": {
+    "model_type": "mlp",
+    "n_params": 837581,
+    "final_train_loss": 1.1501987223562442,
+    "final_val_loss": 1.1468259190258228,
+    "final_val_mae": 0.8379968734163987,
+    "best_val_loss": 1.1457973185338473
+  },
+  "gnn": {
+    "model_type": "gnn",
+    "n_params": 168449,
+    "final_train_loss": 0.00044278156325211265,
+    "final_val_loss": 0.0003650687438743115,
+    "final_val_mae": 0.011782136099517783,
+    "best_val_loss": 0.00035262953418331095
+  }
+}

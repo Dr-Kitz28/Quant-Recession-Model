@@ -293,6 +293,57 @@ class CorrelationPredictor:
 
 
 # ============================================================================
+# Convenience training function
+# ============================================================================
+def train_model(
+    correlations: np.ndarray,
+    anchors: np.ndarray,
+    n_epochs: int = 50,
+    batch_size: int = 32,
+    lr: float = 1e-3,
+    val_split: float = 0.2,
+    device: str = "cpu",
+    save_path: Optional[Path] = None,
+) -> Tuple[CorrelationWeightLearner, Dict]:
+    """
+    Convenience function to train MLP correlation learner.
+    
+    Returns: (trained_model, training_history)
+    """
+    n_spreads = correlations.shape[1]
+    n_corr_features = len(np.triu_indices(n_spreads, k=1)[0])
+    n_anchor_features = anchors.shape[1]
+    
+    # Create dataset
+    dataset = CorrelationSequenceDataset(correlations, anchors)
+    
+    # Split
+    n_val = int(len(dataset) * val_split)
+    n_train = len(dataset) - n_val
+    train_ds, val_ds = torch.utils.data.random_split(dataset, [n_train, n_val])
+    
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+    
+    # Create model
+    model = CorrelationWeightLearner(
+        n_corr_features=n_corr_features,
+        n_anchor_features=n_anchor_features,
+    )
+    
+    # Train
+    trainer = CorrelationWeightTrainer(model, device=device, lr=lr)
+    history = trainer.fit(train_loader, val_loader, epochs=n_epochs, verbose=True)
+    
+    # Save if path provided
+    if save_path:
+        torch.save(model.state_dict(), save_path)
+        print(f"[weight_learner] Saved model to {save_path}")
+    
+    return model, history
+
+
+# ============================================================================
 # CLI / Main
 # ============================================================================
 def load_data(

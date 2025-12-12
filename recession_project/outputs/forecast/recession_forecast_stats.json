@@ -1,40 +1,44 @@
 {
   "date_range": "1985-01-02 to 2029-12-31",
   "total_days": 11298,
-  "mean_probability": 0.15478027959401877,
-  "std_probability": 0.28272697220990917,
-  "median_probability": 0.02113226438685727,
+  "mean_probability": 0.17614205450700696,
+  "std_probability": 0.30235701919592184,
+  "median_probability": 0.016623122933802546,
   "min_probability": 0.01,
   "max_probability": 0.99,
-  "high_probability_days": 1635,
-  "high_probability_pct": 14.47158789166224,
+  "high_probability_days": 2192,
+  "high_probability_pct": 19.40166401132944,
   "threshold": 0.5,
   "high_probability_periods": [
     {
-      "start": "1988-08-18",
-      "end": "1988-11-16"
+      "start": "1988-08-08",
+      "end": "1988-11-07"
     },
     {
-      "start": "1990-03-07",
-      "end": "1991-05-03"
+      "start": "1990-03-09",
+      "end": "1991-04-26"
     },
     {
-      "start": "2000-11-06",
-      "end": "2002-01-11"
+      "start": "1992-01-31",
+      "end": "1992-02-19"
     },
     {
-      "start": "2007-07-16",
-      "end": "2009-05-29"
+      "start": "2000-11-03",
+      "end": "2002-01-09"
     },
     {
-      "start": "2019-10-09",
-      "end": "2020-07-14"
+      "start": "2007-07-31",
+      "end": "2009-06-09"
     },
     {
-      "start": "2028-09-27",
+      "start": "2019-10-08",
+      "end": "2020-06-26"
+    },
+    {
+      "start": "2026-07-30",
       "end": "2029-12-31"
     }
   ],
-  "forecast_peak_date": "2029-12-18",
-  "forecast_peak_probability": 0.6176902992505969
+  "forecast_peak_date": "2029-05-21",
+  "forecast_peak_probability": 0.7146787892370565
 }
